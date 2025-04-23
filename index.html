@@ -3,36 +3,51 @@
 <head>
     <meta charset="utf-8">
     <title>WS/WebRTC benchmark</title>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        .results {
-            border-bottom: 1px solid black;
-            padding-top: 32px;
-            padding-bottom: 16px;
-        }
-
-        .results > span {
-            font-weight: 800;
-        }
-
         header {
             padding: 8px;
             position: fixed;
             top: 0;
             left: 0;
             background-color: white;
+            z-index: 99;
+        }
+
+        article {
+            border-bottom: 1px solid black;
+            padding-top: 32px;
+            padding-bottom: 16px;
+            position: relative;
+            min-height: 300px;
+        }
+
+        article > span {
+            font-weight: 800;
+        }
+
+        canvas {
+            position: absolute;
+            right: 0;
+            bottom: 0;
         }
     </style>
 </head>
 <body>
     <header>
-        <button type="submit" id="start" disabled>
-            Start
-        </button>
-
-        <label for="attempts">
-            Attempts count
+        <label for="messages">
+            Messages count
         </label>
-        <input id="attempts" type="number" value="1"/>
+        <input id="messages" type="number" value="1000"/>
+
+        <label for="size">
+            Data size
+        </label>
+        <input id="size" type="number" value="512"/>
+
+        <button type="submit" id="start" disabled>
+            Connecting...
+        </button>
     </header>
 
     <div id="results">
@@ -41,7 +56,52 @@
 </body>
 
 <script>
-    const DATA_SIZE = 1024
+    const resultsDiv = document.getElementById('results')
+
+    function buildData(data, count, min, size) {
+        const bins = Array(count).fill(0);
+        data.forEach(value => {
+            const index = Math.floor((value - min) / size)
+            bins[index]++;
+        });
+        return bins.map(count => count / bins.length)
+    }
+
+    function buildChart(wsData, webrtcData, ctx, binCount = 10) {
+        const min = Math.min(...wsData, ...webrtcData);
+        const max = Math.max(...wsData, ...webrtcData);
+        const range = max - min;
+        const binSize = range / binCount;
+
+        const labels = Array(binCount).fill(0).map((_, i) => {
+            const binStart = min + i * binSize;
+            const binEnd = binStart + binSize;
+            return `${binStart.toFixed(2)} - ${binEnd.toFixed(2)}ms`;
+        });
+
+        new Chart(ctx, {
+            type: 'bar',
+            data: {
+                labels,
+                datasets: [
+                    {
+                        label: 'WebRTC Distribution',
+                        data: buildData(webrtcData, binCount, min, binSize),
+                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                        borderColor: 'rgba(54, 162, 235, 1)',
+                        borderWidth: 1,
+                    },
+                    {
+                        label: 'WebSocket Distribution',
+                        data: buildData(wsData, binCount, min, binSize),
+                        backgroundColor: 'rgba(54,235,57,0.6)',
+                        borderColor: 'rgb(126,235,54)',
+                        borderWidth: 1,
+                    }
+                ]
+            },
+        });
+    }
 
     class Connection {
         initConnection() {
@@ -59,7 +119,9 @@
             this.peer.ondatachannel = (e) => {
                 e.channel.onopen = () => {
                     this.channel = e.channel
-                    document.getElementById('start').disabled = false
+                    const start = document.getElementById('start')
+                    start.disabled = false
+                    start.innerHTML = "Start"
                     this.removeHandler()
                 }
             }
@@ -107,44 +169,55 @@
             for (let i = 0; i < count; i++) {
                 res[i] = await this.benchTransport(data[i], transport)
             }
-            return res.reduce((acc, i) => acc + i, 0) / res.length
+            return res
         }
 
         async startBench(){
-            const count = Number(document.getElementById('attempts').value)
+            const start = document.getElementById('start')
+            start.disabled = true
+            start.innerHTML = "Running..."
+            const count = Number(document.getElementById('messages').value)
+            const size = Number(document.getElementById('size').value)
             const data = Array(count).fill(0).map(() => {
-                const buffer = new ArrayBuffer(DATA_SIZE);
+                const buffer = new ArrayBuffer(size);
                 const view = new Uint8Array(buffer);
                 crypto.getRandomValues(view);
                 return buffer
             })
 
-            const resDiv = document.createElement('div')
-            resDiv.classList.add('results')
+            const resDiv = document.createElement('article')
             const dataRow = document.createElement('span')
-            dataRow.innerHTML = `data size: ${DATA_SIZE} bytes; attempts: ${count}`
+            dataRow.innerHTML = `data size: ${size} bytes; messages: ${count}`
             resDiv.append(dataRow)
 
             const wsResElement = document.createElement('p')
-            const wsAvg = await this.bulkBenchTransport(data, this.ws, count)
-            wsResElement.innerText = `ws avg: ${wsAvg}`
+            const wsData = await this.bulkBenchTransport(data, this.ws, count)
+            const wsAvg = wsData.reduce((acc, i) => acc + i, 0) / count
+            wsResElement.innerText = `ws avg: ${wsAvg.toFixed(4)}ms`
             resDiv.append(wsResElement)
 
             const webrtcResElement = document.createElement('p')
-            const webrtcAvg = await this.bulkBenchTransport(data, this.channel, count)
-            webrtcResElement.innerText = `webrtc avg: ${webrtcAvg}`
+            const webrtcData = await this.bulkBenchTransport(data, this.channel, count)
+            const webrtcAvg = webrtcData.reduce((acc, i) => acc + i, 0) / count
+            webrtcResElement.innerText = `webrtc avg: ${webrtcAvg.toFixed(4)}ms`
             resDiv.append(webrtcResElement)
 
             const ratioEl = document.createElement('span')
             if (webrtcAvg > wsAvg) {
-                ratioEl.innerHTML = `ws is faster in ${webrtcAvg / wsAvg} times`
+                ratioEl.innerHTML = `ws is faster in ${(webrtcAvg / wsAvg).toFixed(2)} times`
             }else {
-                ratioEl.innerHTML = `webrtc is faster in ${wsAvg / webrtcAvg} times`
+                ratioEl.innerHTML = `webrtc is faster in ${(wsAvg / webrtcAvg).toFixed(2)} times`
             }
             resDiv.append(ratioEl)
 
-            document.getElementById('results').append(resDiv)
+            const canvas = document.createElement('canvas')
+            resDiv.append(canvas)
+            buildChart(wsData, webrtcData, canvas.getContext('2d'), 20);
+
+            resultsDiv.append(resDiv)
             window.scrollTo(0, document.body.scrollHeight)
+            start.disabled = false
+            start.innerHTML = "Start"
         }
     }
 
