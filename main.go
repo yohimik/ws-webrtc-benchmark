@@ -11,13 +11,17 @@ import (
 	"os"
 )
 
+type Msg struct {
+	Candidate   *webrtc.ICECandidateInit   `json:"candidate,omitempty"`
+	Description *webrtc.SessionDescription `json:"description,omitempty"`
+}
+
 const peerKey = "peer"
 
 func main() {
 	wServer := websocket.Server{}
 	wServer.HandleOpen(onOpen)
 	wServer.HandleData(onData)
-
 	r := router.New()
 	indexHTMLBytes, err := os.ReadFile("index.html")
 	if err != nil {
@@ -29,15 +33,23 @@ func main() {
 		fmt.Fprintln(ctx, indexHTML)
 	})
 	r.GET("/ws", wServer.Upgrade)
+	server := fasthttp.Server{
+		Handler: r.Handler,
+	}
+	server.ListenAndServe(":8080")
 }
 
 func onOpen(c *websocket.Conn) {
-	peer := &webrtc.PeerConnection{}
+	peer, err := webrtc.NewPeerConnection(webrtc.Configuration{})
+	if err != nil {
+		return
+	}
 	peer.OnICECandidate(func(candidate *webrtc.ICECandidate) {
 		if candidate == nil {
 			return
 		}
-		write(c, candidate.ToJSON())
+		candidateJSON := candidate.ToJSON()
+		write(c, &Msg{Candidate: &candidateJSON})
 	})
 	channel, err := peer.CreateDataChannel("data", &webrtc.DataChannelInit{})
 	if err != nil {
@@ -46,12 +58,16 @@ func onOpen(c *websocket.Conn) {
 	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
 		channel.Send(msg.Data)
 	})
+	offer, err := peer.CreateOffer(nil)
+	if err != nil {
+		return
+	}
+	err = peer.SetLocalDescription(offer)
+	if err != nil {
+		return
+	}
 	c.SetUserValue(peerKey, peer)
-}
-
-type Msg struct {
-	Candidate   *webrtc.ICECandidateInit
-	Description *webrtc.SessionDescription
+	write(c, &Msg{Description: &offer})
 }
 
 func onData(c *websocket.Conn, isBinary bool, data []byte) {

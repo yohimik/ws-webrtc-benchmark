@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="utf-8">
+    <title>WS/WebRTC benchmark</title>
+</head>
+<body>
+
+
+</body>
+
+<script>
+    class Connection {
+        connect() {
+            this.ws = new WebSocket("ws://localhost:8080/ws")
+            this.ws.onmessage = async (msg) => {
+                this.initConnection()
+                const parsed = JSON.parse(msg.data)
+                if (parsed.description) {
+                    await this.peer.setRemoteDescription(parsed.description)
+                    const answer = await this.peer.createAnswer()
+                    await this.peer.setLocalDescription(answer)
+                    this.ws.send(JSON.stringify({
+                        description: answer
+                    }))
+                }
+                if (parsed.candidate) {
+                    await this.peer.addIceCandidate(parsed.candidate)
+                }
+            }
+        }
+
+        initConnection() {
+            if (this.peer) return
+
+            this.peer = new RTCPeerConnection()
+            this.peer.onicecandidate = e => {
+                if (!e.candidate) {
+                    return
+                }
+                this.ws.send(JSON.stringify({
+                    candidate: e.candidate.toJSON()
+                }))
+            }
+            this.peer.ondatachannel = (e) => {
+                this.channel.onmessage = (e) => {
+                }
+                this.channel.onopen = () => {
+                    this.channel = e.channel
+                }
+            }
+        }
+    }
+    
+    const connection = new Connection()
+    connection.connect()
+</script>
+</html>
