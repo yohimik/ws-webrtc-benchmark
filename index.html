@@ -3,33 +3,47 @@
 <head>
     <meta charset="utf-8">
     <title>WS/WebRTC benchmark</title>
+    <style>
+        .results {
+            border-bottom: 1px solid black;
+            padding-top: 32px;
+            padding-bottom: 16px;
+        }
+
+        .results > span {
+            font-weight: 800;
+        }
+
+        header {
+            padding: 8px;
+            position: fixed;
+            top: 0;
+            left: 0;
+            background-color: white;
+        }
+    </style>
 </head>
 <body>
+    <header>
+        <button type="submit" id="start" disabled>
+            Start
+        </button>
 
+        <label for="attempts">
+            Attempts count
+        </label>
+        <input id="attempts" type="number" value="1"/>
+    </header>
 
+    <div id="results">
+
+    </div>
 </body>
 
 <script>
-    class Connection {
-        connect() {
-            this.ws = new WebSocket("ws://localhost:8080/ws")
-            this.ws.onmessage = async (msg) => {
-                this.initConnection()
-                const parsed = JSON.parse(msg.data)
-                if (parsed.description) {
-                    await this.peer.setRemoteDescription(parsed.description)
-                    const answer = await this.peer.createAnswer()
-                    await this.peer.setLocalDescription(answer)
-                    this.ws.send(JSON.stringify({
-                        description: answer
-                    }))
-                }
-                if (parsed.candidate) {
-                    await this.peer.addIceCandidate(parsed.candidate)
-                }
-            }
-        }
+    const DATA_SIZE = 1024
 
+    class Connection {
         initConnection() {
             if (this.peer) return
 
@@ -43,16 +57,102 @@
                 }))
             }
             this.peer.ondatachannel = (e) => {
-                this.channel.onmessage = (e) => {
-                }
-                this.channel.onopen = () => {
+                e.channel.onopen = () => {
                     this.channel = e.channel
+                    document.getElementById('start').disabled = false
+                    this.removeHandler()
                 }
             }
         }
+
+        connect() {
+            this.ws = new WebSocket("ws://localhost:8080/ws")
+            const handler = async (e) => {
+                this.initConnection()
+                const parsed = JSON.parse(e.data)
+                if (parsed.description) {
+                    await this.peer.setRemoteDescription(parsed.description)
+                    const answer = await this.peer.createAnswer()
+                    await this.peer.setLocalDescription(answer)
+                    this.ws.send(JSON.stringify({
+                        description: answer
+                    }))
+                }
+                if (parsed.candidate) {
+                    await this.peer.addIceCandidate(parsed.candidate)
+                }
+            }
+            this.ws.addEventListener('message', handler)
+            this.removeHandler = () => {
+                this.ws.removeEventListener('message', handler)
+            }
+        }
+
+        benchTransport(data, transport) {
+            return new Promise((resolve) => {
+                let start = 0
+                const listener = () => {
+                    const end = performance.now()
+                    transport.removeEventListener('message', listener)
+                    resolve(end - start)
+                }
+                transport.addEventListener('message', listener)
+                start = performance.now()
+                transport.send(data)
+            })
+        }
+
+        async bulkBenchTransport(data, transport, count) {
+            const res = new Array(count)
+            for (let i = 0; i < count; i++) {
+                res[i] = await this.benchTransport(data[i], transport)
+            }
+            return res.reduce((acc, i) => acc + i, 0) / res.length
+        }
+
+        async startBench(){
+            const count = Number(document.getElementById('attempts').value)
+            const data = Array(count).fill(0).map(() => {
+                const buffer = new ArrayBuffer(DATA_SIZE);
+                const view = new Uint8Array(buffer);
+                crypto.getRandomValues(view);
+                return buffer
+            })
+
+            const resDiv = document.createElement('div')
+            resDiv.classList.add('results')
+            const dataRow = document.createElement('span')
+            dataRow.innerHTML = `data size: ${DATA_SIZE} bytes; attempts: ${count}`
+            resDiv.append(dataRow)
+
+            const wsResElement = document.createElement('p')
+            const wsAvg = await this.bulkBenchTransport(data, this.ws, count)
+            wsResElement.innerText = `ws avg: ${wsAvg}`
+            resDiv.append(wsResElement)
+
+            const webrtcResElement = document.createElement('p')
+            const webrtcAvg = await this.bulkBenchTransport(data, this.channel, count)
+            webrtcResElement.innerText = `webrtc avg: ${webrtcAvg}`
+            resDiv.append(webrtcResElement)
+
+            const ratioEl = document.createElement('span')
+            if (webrtcAvg > wsAvg) {
+                ratioEl.innerHTML = `ws is faster in ${webrtcAvg / wsAvg} times`
+            }else {
+                ratioEl.innerHTML = `webrtc is faster in ${wsAvg / webrtcAvg} times`
+            }
+            resDiv.append(ratioEl)
+
+            document.getElementById('results').append(resDiv)
+            window.scrollTo(0, document.body.scrollHeight)
+        }
     }
-    
+
     const connection = new Connection()
     connection.connect()
+
+    document.getElementById('start').addEventListener('click', () => {
+        connection.startBench()
+    })
 </script>
 </html>

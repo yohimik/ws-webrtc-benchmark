@@ -23,12 +23,12 @@ func main() {
 	wServer.HandleOpen(onOpen)
 	wServer.HandleData(onData)
 	r := router.New()
-	indexHTMLBytes, err := os.ReadFile("index.html")
-	if err != nil {
-		panic(err)
-	}
-	indexHTML := string(indexHTMLBytes)
 	r.GET("/", func(ctx *fasthttp.RequestCtx) {
+		indexHTMLBytes, err := os.ReadFile("index.html")
+		if err != nil {
+			panic(err)
+		}
+		indexHTML := string(indexHTMLBytes)
 		ctx.SetContentType("text/html")
 		fmt.Fprintln(ctx, indexHTML)
 	})
@@ -72,7 +72,11 @@ func onOpen(c *websocket.Conn) {
 
 func onData(c *websocket.Conn, isBinary bool, data []byte) {
 	if isBinary {
-		c.Write(data)
+		fr := websocket.AcquireFrame()
+		fr.SetFin()
+		fr.SetPayload(data)
+		fr.SetBinary()
+		c.WriteFrame(fr)
 		return
 	}
 	msg := &Msg{}
