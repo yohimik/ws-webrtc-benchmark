@@ -51,13 +51,24 @@ func onOpen(c *websocket.Conn) {
 		candidateJSON := candidate.ToJSON()
 		write(c, &Msg{Candidate: &candidateJSON})
 	})
-	channel, err := peer.CreateDataChannel("data", &webrtc.DataChannelInit{})
+
+	ordered, err := peer.CreateDataChannel("ordered", &webrtc.DataChannelInit{})
 	if err != nil {
 		return
 	}
-	channel.OnMessage(func(msg webrtc.DataChannelMessage) {
-		channel.Send(msg.Data)
+	ordered.OnMessage(func(msg webrtc.DataChannelMessage) {
+		ordered.Send(msg.Data)
 	})
+
+	f := false
+	unordered, err := peer.CreateDataChannel("unordered", &webrtc.DataChannelInit{Ordered: &f})
+	if err != nil {
+		return
+	}
+	unordered.OnMessage(func(msg webrtc.DataChannelMessage) {
+		unordered.Send(msg.Data)
+	})
+
 	offer, err := peer.CreateOffer(nil)
 	if err != nil {
 		return

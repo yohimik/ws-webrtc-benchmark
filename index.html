@@ -67,9 +67,14 @@
         return bins.map(count => count / bins.length)
     }
 
-    function buildChart(wsData, webrtcData, ctx, binCount = 10) {
-        const min = Math.min(...wsData, ...webrtcData);
-        const max = Math.max(...wsData, ...webrtcData);
+    function buildChart(pings, ctx, binCount = 10) {
+        const allData = []
+        pings.forEach(ping => {
+            allData.push(...ping.data)
+        })
+
+        const min = Math.min(...allData);
+        const max = Math.max(...allData);
         const range = max - min;
         const binSize = range / binCount;
 
@@ -79,31 +84,47 @@
             return `${binStart.toFixed(2)} - ${binEnd.toFixed(2)}ms`;
         });
 
+        const datasets = pings.map(p => ({
+            label: p.label,
+            data: buildData(p.data, binCount, min, binSize),
+            backgroundColor: p.backgroundColor,
+            borderColor: p.borderColor,
+            borderWidth: 1,
+        }))
+
         new Chart(ctx, {
             type: 'bar',
             data: {
                 labels,
-                datasets: [
-                    {
-                        label: 'WebRTC Distribution',
-                        data: buildData(webrtcData, binCount, min, binSize),
-                        backgroundColor: 'rgba(54, 162, 235, 0.6)',
-                        borderColor: 'rgba(54, 162, 235, 1)',
-                        borderWidth: 1,
-                    },
-                    {
-                        label: 'WebSocket Distribution',
-                        data: buildData(wsData, binCount, min, binSize),
-                        backgroundColor: 'rgba(54,235,57,0.6)',
-                        borderColor: 'rgb(126,235,54)',
-                        borderWidth: 1,
-                    }
-                ]
+                datasets,
             },
         });
     }
 
     class Connection {
+        constructor() {
+            this.transports = [
+                {
+                    label: 'WebSocket',
+                    backgroundColor: 'rgba(54,235,57,0.6)',
+                    borderColor: 'rgb(126,235,54)',
+                    transport: () => this.ws,
+                },
+                {
+                    label: 'WebRTC (ordered)',
+                    backgroundColor: 'rgba(54, 162, 235, 0.6)',
+                    borderColor: 'rgba(54, 162, 235, 1)',
+                    transport: () => this.orderedChannel,
+                },
+                {
+                    label: 'WebRTC (unordered)',
+                    backgroundColor: 'rgba(78,54,235,0.6)',
+                    borderColor: 'rgb(105,54,235)',
+                    transport: () => this.unorderedChannel,
+                },
+            ]
+        }
+
         initConnection() {
             if (this.peer) return
 
@@ -118,7 +139,12 @@
             }
             this.peer.ondatachannel = (e) => {
                 e.channel.onopen = () => {
-                    this.channel = e.channel
+                    if (e.channel.label === 'ordered') {
+                        this.orderedChannel = e.channel
+                    } else {
+                        this.unorderedChannel = e.channel
+                    }
+                    if (!this.orderedChannel || !this.unorderedChannel) return
                     const start = document.getElementById('start')
                     start.disabled = false
                     start.innerHTML = "Start"
@@ -155,18 +181,18 @@
                 let start = 0
                 const listener = () => {
                     const end = performance.now()
-                    transport.removeEventListener('message', listener)
+                    transport().removeEventListener('message', listener)
                     resolve(end - start)
                 }
-                transport.addEventListener('message', listener)
+                transport().addEventListener('message', listener)
                 start = performance.now()
-                transport.send(data)
+                transport().send(data)
             })
         }
 
-        async bulkBenchTransport(data, transport, count) {
-            const res = new Array(count)
-            for (let i = 0; i < count; i++) {
+        async bulkBenchTransport(data, transport) {
+            const res = new Array(data.length)
+            for (let i = 0; i < data.length; i++) {
                 res[i] = await this.benchTransport(data[i], transport)
             }
             return res
@@ -190,29 +216,39 @@
             dataRow.innerHTML = `data size: ${size} bytes; messages: ${count}`
             resDiv.append(dataRow)
 
-            const wsResElement = document.createElement('p')
-            const wsData = await this.bulkBenchTransport(data, this.ws, count)
-            const wsAvg = wsData.reduce((acc, i) => acc + i, 0) / count
-            wsResElement.innerText = `ws avg: ${wsAvg.toFixed(4)}ms`
-            resDiv.append(wsResElement)
+            const pings = new Array(this.transports.length)
+            for (let i = 0; i < this.transports.length; i++) {
+                pings[i] = {
+                    ...this.transports[i]
+                }
+                const resEl = document.createElement('p')
+                pings[i].data = await this.bulkBenchTransport(data, pings[i].transport)
+                pings[i].avg = pings[i].data.reduce((acc, i) => acc + i, 0) / count
+                resEl.innerText = `${pings[i].label} avg: ${pings[i].avg.toFixed(4)}ms`
+                resDiv.append(resEl)
+            }
 
-            const webrtcResElement = document.createElement('p')
-            const webrtcData = await this.bulkBenchTransport(data, this.channel, count)
-            const webrtcAvg = webrtcData.reduce((acc, i) => acc + i, 0) / count
-            webrtcResElement.innerText = `webrtc avg: ${webrtcAvg.toFixed(4)}ms`
-            resDiv.append(webrtcResElement)
+            const pingsMin = pings.reduce((acc, i) => {
+                if (i.avg < acc.avg) {
+                    return i
+                }
+                return acc
+            })
+
+            const pingsMax = pings.reduce((acc, i) => {
+                if (i.avg > acc.avg) {
+                    return i
+                }
+                return acc
+            })
 
             const ratioEl = document.createElement('span')
-            if (webrtcAvg > wsAvg) {
-                ratioEl.innerHTML = `ws is faster in ${(webrtcAvg / wsAvg).toFixed(2)} times`
-            }else {
-                ratioEl.innerHTML = `webrtc is faster in ${(wsAvg / webrtcAvg).toFixed(2)} times`
-            }
+            ratioEl.innerHTML = `${pingsMin.label} is faster in ${(pingsMax.avg / pingsMin.avg).toFixed(2)} times`
             resDiv.append(ratioEl)
 
             const canvas = document.createElement('canvas')
             resDiv.append(canvas)
-            buildChart(wsData, webrtcData, canvas.getContext('2d'), 20);
+            buildChart(pings, canvas.getContext('2d'), 20);
 
             resultsDiv.append(resDiv)
             window.scrollTo(0, document.body.scrollHeight)
