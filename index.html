@@ -3,7 +3,6 @@
 <head>
     <meta charset="utf-8">
     <title>WS/WebRTC benchmark</title>
-    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
         form {
             padding: 8px;
@@ -24,12 +23,6 @@
 
         article > span {
             font-weight: 800;
-        }
-
-        canvas {
-            position: absolute;
-            right: 0;
-            bottom: 0;
         }
     </style>
 </head>
@@ -57,49 +50,6 @@
 
 <script>
     const resultsDiv = document.getElementById('results')
-
-    function buildData(data, count, min, size) {
-        const bins = Array(count).fill(0);
-        data.forEach(value => {
-            const index = Math.floor((value - min) / size)
-            bins[index]++;
-        });
-        return bins.map(count => count / bins.length)
-    }
-
-    function buildChart(pings, ctx, binCount = 10) {
-        const allData = []
-        pings.forEach(ping => {
-            allData.push(...ping.data)
-        })
-
-        const min = Math.min(...allData);
-        const max = Math.max(...allData);
-        const range = max - min;
-        const binSize = range / binCount;
-
-        const labels = Array(binCount).fill(0).map((_, i) => {
-            const binStart = min + i * binSize;
-            const binEnd = binStart + binSize;
-            return `${binStart.toFixed(2)} - ${binEnd.toFixed(2)}ms`;
-        });
-
-        const datasets = pings.map(p => ({
-            label: p.label,
-            data: buildData(p.data, binCount, min, binSize),
-            backgroundColor: p.backgroundColor,
-            borderColor: p.borderColor,
-            borderWidth: 1,
-        }))
-
-        new Chart(ctx, {
-            type: 'bar',
-            data: {
-                labels,
-                datasets,
-            },
-        });
-    }
 
     class Connection {
         constructor() {
@@ -189,19 +139,16 @@
 
         bulkBenchTransport(data, transport) {
             return new Promise(resolve => {
-                const res = new Array(data.length)
                 let count = 0
                 let start = 0
                 const listener = () => {
-                    const end = performance.now()
-                    res[count] = end - start
-                    count++
+                    count += 1
                     if (count >= data.length) {
+                        const end = performance.now()
                         transport().removeEventListener('message', listener)
-                        resolve(res)
+                        resolve(end - start)
                         return
                     }
-                    start = performance.now()
                     transport().send(data[count])
                 }
                 transport().addEventListener('message', listener)
@@ -235,32 +182,27 @@
                 }
                 const resEl = document.createElement('p')
                 pings[i].data = await this.bulkBenchTransport(data, pings[i].transport)
-                pings[i].avg = pings[i].data.reduce((acc, i) => acc + i, 0) / count
-                resEl.innerText = `${pings[i].label} avg: ${pings[i].avg.toFixed(4)}ms`
+                resEl.innerText = `${pings[i].label}: ${pings[i].data.toFixed(4)}ms`
                 resDiv.append(resEl)
             }
 
             const pingsMin = pings.reduce((acc, i) => {
-                if (i.avg < acc.avg) {
+                if (i.data < acc.data) {
                     return i
                 }
                 return acc
             })
 
             const pingsMax = pings.reduce((acc, i) => {
-                if (i.avg > acc.avg) {
+                if (i.data > acc.data) {
                     return i
                 }
                 return acc
             })
 
             const ratioEl = document.createElement('span')
-            ratioEl.innerHTML = `${pingsMin.label} is faster in ${(pingsMax.avg / pingsMin.avg).toFixed(2)} times`
+            ratioEl.innerHTML = `${pingsMin.label} is faster in ${(pingsMax.data / pingsMin.data).toFixed(2)} times`
             resDiv.append(ratioEl)
-
-            const canvas = document.createElement('canvas')
-            resDiv.append(canvas)
-            buildChart(pings, canvas.getContext('2d'), 20);
 
             resultsDiv.append(resDiv)
             window.scrollTo(0, document.body.scrollHeight)
