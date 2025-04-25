@@ -5,7 +5,7 @@
     <title>WS/WebRTC benchmark</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <style>
-        header {
+        form {
             padding: 8px;
             position: fixed;
             top: 0;
@@ -34,7 +34,7 @@
     </style>
 </head>
 <body>
-    <header>
+    <form id="form">
         <label for="messages">
             Messages count
         </label>
@@ -43,12 +43,12 @@
         <label for="size">
             Data size
         </label>
-        <input id="size" type="number" value="512"/>
+        <input id="size" type="number" value="512" max="65536"/>
 
         <button type="submit" id="start" disabled>
             Connecting...
         </button>
-    </header>
+    </form>
 
     <div id="results">
 
@@ -111,16 +111,28 @@
                     transport: () => this.ws,
                 },
                 {
-                    label: 'WebRTC (ordered)',
+                    label: 'WebRTC (ordered, reliable)',
                     backgroundColor: 'rgba(54, 162, 235, 0.6)',
                     borderColor: 'rgba(54, 162, 235, 1)',
-                    transport: () => this.orderedChannel,
+                    transport: () => this.orderedReliable,
                 },
                 {
-                    label: 'WebRTC (unordered)',
+                    label: 'WebRTC (unordered, reliable)',
                     backgroundColor: 'rgba(78,54,235,0.6)',
                     borderColor: 'rgb(105,54,235)',
-                    transport: () => this.unorderedChannel,
+                    transport: () => this.unorderedReliable,
+                },
+                {
+                    label: 'WebRTC (ordered, unreliable)',
+                    backgroundColor: 'rgba(163,54,235,0.6)',
+                    borderColor: 'rgb(202,54,235)',
+                    transport: () => this.orderedUnreliable,
+                },
+                {
+                    label: 'WebRTC (unordered, unreliable)',
+                    backgroundColor: 'rgba(235,54,211,0.6)',
+                    borderColor: 'rgb(235,54,135)',
+                    transport: () => this.unorderedUnreliable,
                 },
             ]
         }
@@ -137,14 +149,13 @@
                     candidate: e.candidate.toJSON()
                 }))
             }
+            let count = 0
             this.peer.ondatachannel = (e) => {
                 e.channel.onopen = () => {
-                    if (e.channel.label === 'ordered') {
-                        this.orderedChannel = e.channel
-                    } else {
-                        this.unorderedChannel = e.channel
-                    }
-                    if (!this.orderedChannel || !this.unorderedChannel) return
+                    this[e.channel.label] = e.channel
+                    count++
+                    console.log({count})
+                    if (count < this.transports.length - 1) return
                     const start = document.getElementById('start')
                     start.disabled = false
                     start.innerHTML = "Start"
@@ -176,26 +187,27 @@
             }
         }
 
-        benchTransport(data, transport) {
-            return new Promise((resolve) => {
+        bulkBenchTransport(data, transport) {
+            return new Promise(resolve => {
+                const res = new Array(data.length)
+                let count = 0
                 let start = 0
                 const listener = () => {
                     const end = performance.now()
-                    transport().removeEventListener('message', listener)
-                    resolve(end - start)
+                    res[count] = end - start
+                    count++
+                    if (count >= data.length) {
+                        transport().removeEventListener('message', listener)
+                        resolve(res)
+                        return
+                    }
+                    start = performance.now()
+                    transport().send(data[count])
                 }
                 transport().addEventListener('message', listener)
                 start = performance.now()
-                transport().send(data)
+                transport().send(data[count])
             })
-        }
-
-        async bulkBenchTransport(data, transport) {
-            const res = new Array(data.length)
-            for (let i = 0; i < data.length; i++) {
-                res[i] = await this.benchTransport(data[i], transport)
-            }
-            return res
         }
 
         async startBench(){
@@ -260,7 +272,8 @@
     const connection = new Connection()
     connection.connect()
 
-    document.getElementById('start').addEventListener('click', () => {
+    document.getElementById('form').addEventListener('submit', (e) => {
+        e.preventDefault()
         connection.startBench()
     })
 </script>

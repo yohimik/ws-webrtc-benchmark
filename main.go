@@ -52,21 +52,44 @@ func onOpen(c *websocket.Conn) {
 		write(c, &Msg{Candidate: &candidateJSON})
 	})
 
-	ordered, err := peer.CreateDataChannel("ordered", &webrtc.DataChannelInit{})
+	orderedReliable, err := peer.CreateDataChannel("orderedReliable", &webrtc.DataChannelInit{})
 	if err != nil {
 		return
 	}
-	ordered.OnMessage(func(msg webrtc.DataChannelMessage) {
-		ordered.Send(msg.Data)
+	orderedReliable.OnMessage(func(msg webrtc.DataChannelMessage) {
+		orderedReliable.Send(msg.Data)
 	})
 
 	f := false
-	unordered, err := peer.CreateDataChannel("unordered", &webrtc.DataChannelInit{Ordered: &f})
+	unorderedReliable, err := peer.CreateDataChannel("unorderedReliable", &webrtc.DataChannelInit{
+		Ordered: &f,
+	})
 	if err != nil {
 		return
 	}
-	unordered.OnMessage(func(msg webrtc.DataChannelMessage) {
-		unordered.Send(msg.Data)
+	unorderedReliable.OnMessage(func(msg webrtc.DataChannelMessage) {
+		unorderedReliable.Send(msg.Data)
+	})
+
+	var z uint16 = 0
+	orderedUnreliable, err := peer.CreateDataChannel("orderedUnreliable", &webrtc.DataChannelInit{
+		MaxRetransmits: &z,
+	})
+	if err != nil {
+		return
+	}
+	orderedUnreliable.OnMessage(func(msg webrtc.DataChannelMessage) {
+		orderedUnreliable.Send(msg.Data)
+	})
+	unorderedUnreliable, err := peer.CreateDataChannel("unorderedUnreliable", &webrtc.DataChannelInit{
+		MaxRetransmits: &z,
+		Ordered:        &f,
+	})
+	if err != nil {
+		return
+	}
+	unorderedUnreliable.OnMessage(func(msg webrtc.DataChannelMessage) {
+		unorderedUnreliable.Send(msg.Data)
 	})
 
 	offer, err := peer.CreateOffer(nil)
