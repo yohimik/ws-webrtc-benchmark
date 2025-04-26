@@ -55,12 +55,6 @@
         constructor() {
             this.transports = [
                 {
-                    label: 'WebSocket',
-                    backgroundColor: 'rgba(54,235,57,0.6)',
-                    borderColor: 'rgb(126,235,54)',
-                    transport: () => this.ws,
-                },
-                {
                     label: 'WebRTC (ordered, reliable)',
                     backgroundColor: 'rgba(54, 162, 235, 0.6)',
                     borderColor: 'rgba(54, 162, 235, 1)',
@@ -83,6 +77,12 @@
                     backgroundColor: 'rgba(235,54,211,0.6)',
                     borderColor: 'rgb(235,54,135)',
                     transport: () => this.unorderedUnreliable,
+                },
+                {
+                    label: 'WebSocket',
+                    backgroundColor: 'rgba(54,235,57,0.6)',
+                    borderColor: 'rgb(126,235,54)',
+                    transport: () => this.ws,
                 },
             ]
         }
@@ -145,15 +145,15 @@
                     count += 1
                     if (count >= data.length) {
                         const end = performance.now()
-                        transport().removeEventListener('message', listener)
+                        transport.removeEventListener('message', listener)
                         resolve(end - start)
                         return
                     }
-                    transport().send(data[count])
+                    transport.send(data[count])
                 }
-                transport().addEventListener('message', listener)
+                transport.addEventListener('message', listener)
                 start = performance.now()
-                transport().send(data[count])
+                transport.send(data[count])
             })
         }
 
@@ -181,7 +181,7 @@
                     ...this.transports[i]
                 }
                 const resEl = document.createElement('p')
-                pings[i].data = await this.bulkBenchTransport(data, pings[i].transport)
+                pings[i].data = await this.bulkBenchTransport(data, pings[i].transport())
                 resEl.innerText = `${pings[i].label}: ${pings[i].data.toFixed(4)}ms`
                 resDiv.append(resEl)
             }
